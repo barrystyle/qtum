@@ -12,6 +12,8 @@
 #include <serialize.h>
 #include <uint256.h>
 
+#include <version.h>
+
 static const int SERIALIZE_TRANSACTION_NO_WITNESS = 0x40000000;
 
 /** An outpoint - a combination of a transaction hash and an index n into its vout */
@@ -211,6 +213,7 @@ inline void UnserializeTransaction(TxType& tx, Stream& s) {
     const bool fAllowWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_WITNESS);
 
     s >> tx.nVersion;
+    s >> tx.nTime;
     unsigned char flags = 0;
     tx.vin.clear();
     tx.vout.clear();
@@ -242,7 +245,6 @@ inline void UnserializeTransaction(TxType& tx, Stream& s) {
         /* Unknown flag in the serialization */
         throw std::ios_base::failure("Unknown transaction optional data");
     }
-    s >> tx.nTime;
     s >> tx.nLockTime;
 }
 
@@ -251,6 +253,7 @@ inline void SerializeTransaction(const TxType& tx, Stream& s) {
     const bool fAllowWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_WITNESS);
 
     s << tx.nVersion;
+    s << tx.nTime;
     unsigned char flags = 0;
     // Consistency check
     if (fAllowWitness) {
@@ -272,10 +275,8 @@ inline void SerializeTransaction(const TxType& tx, Stream& s) {
             s << tx.vin[i].scriptWitness.stack;
         }
     }
-    s << tx.nTime;
     s << tx.nLockTime;
 }
-
 
 /** The basic transaction that is broadcasted on the network and contained in
  * blocks.  A transaction can contain multiple inputs and outputs.
@@ -291,8 +292,6 @@ public:
     // bumping the default CURRENT_VERSION at which point both CURRENT_VERSION and
     // MAX_STANDARD_VERSION will be equal.
     static const int32_t MAX_STANDARD_VERSION=2;
-
-    CTxWitness wit;
 
     // The local variables are made const to prevent unintended modification
     // without updating the cached hash value. However, CTransaction is not
@@ -414,7 +413,6 @@ struct CMutableTransaction
 {
     std::vector<CTxIn> vin;
     std::vector<CTxOut> vout;
-    CTxWitness wit;
     int32_t nVersion;
     uint32_t nTime;
     uint32_t nLockTime;
