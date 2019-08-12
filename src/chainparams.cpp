@@ -103,8 +103,21 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime = 0;
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = 999999999999ULL;
 
+        //SMART_CONTRACTS_HARDFORK deployment does not require start time and timeout, because it uses block number
+        //This is not used now, because we need to check this bit in block.h using versionbits, which results in cyclic
+        //dependency block <- versionbits <- chain <- block
+        //TODO: fix cyclic dependency
+        consensus.vDeployments[Consensus::SMART_CONTRACTS_HARDFORK].bit = 30;
+
+        nSwitchPhi2Block = 299501;
+        nFirstSCBlock = 350000;
+        nPruneAfterHeight = 300000;
+        nSplitRewardBlock = 300000;
+        nPreminePaymentandHardForkBlock = 621950;
+        nStartDevfeeBlock = 828100; //Starting block
+
         // The best chain should have at least this much work.
-        consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000000fe9a0a868307506a7b"); // qtum
+        consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000000000000000000000000");
 
         // By default assume that the signatures in ancestors of this block are valid.
         consensus.defaultAssumeValid = uint256S("0x739f1472b1725adcd493fc5ccefa5fec81066f4dcbf18c9e7ac4f217ef98def5"); // 363604
@@ -114,11 +127,11 @@ public:
          * The characters are rarely used upper ASCII, not valid as UTF-8, and produce
          * a large 32-bit integer with any alignment.
          */
-        pchMessageStart[0] = 0xf1;
-        pchMessageStart[1] = 0xcf;
-        pchMessageStart[2] = 0xa6;
-        pchMessageStart[3] = 0xd3;
-        nDefaultPort = 3888;
+        pchMessageStart[0] = 0x6a;
+        pchMessageStart[1] = 0xb3;
+        pchMessageStart[2] = 0xc8;
+        pchMessageStart[3] = 0xa9;
+        nDefaultPort = 26969;
         nPruneAfterHeight = 100000;
         m_assumed_blockchain_size = 6;
         m_assumed_chain_state_size = 2;
@@ -129,19 +142,14 @@ public:
         assert(consensus.hashGenesisBlock == uint256S("0x00000759bb3da130d7c9aedae170da8335f5a0d01a9007e4c8d3ccd08ace6a42"));
         assert(genesis.hashMerkleRoot == uint256S("0xe08ae0cfc35a1d70e6764f347fdc54355206adeb382446dd54c32cd0201000d3"));
 
-        // Note that of those which support the service bits prefix, most only support a subset of
-        // possible options.
-        // This is fine at runtime as we'll fall back to using them as a oneshot if they don't support the
-        // service bits we want, but we should get them updated to support all service bits wanted by any
-        // release ASAP to avoid it where possible.
-        vSeeds.emplace_back("qtum3.dynu.net"); // Qtum mainnet
-        vSeeds.emplace_back("qtum5.dynu.net"); // Qtum mainnet
-        vSeeds.emplace_back("qtum6.dynu.net"); // Qtum mainnet
-        vSeeds.emplace_back("qtum7.dynu.net"); // Qtum mainnet
+        ////////////////////////////////////////////////////////////////////////////////////////////////
+        vSeeds.push_back(CDNSSeedData("Seed1", "seed.luxcore.tech"));       // LUX seeder
+        vSeeds.push_back(CDNSSeedData("Seed2", "seed.luxseeds.nl"));        // LUX seeder
+        vSeeds.push_back(CDNSSeedData("Seed3", "lux.yiimp.eu"));            // LUX seeder with IPv6
 
-        base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,58);
-        base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,50);
-        base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,128);
+        base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,48); // LUX address start with 'L'
+        base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,63); // LUX script addresses start with 'S'
+        base58Prefixes[SECRET_KEY]     = std::vector<unsigned char>(1,155);
         base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x88, 0xB2, 0x1E};
         base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x88, 0xAD, 0xE4};
 
@@ -155,7 +163,7 @@ public:
 
         checkpointData = {
             {
-                { 0, uint256S("0x00000b773a72afd051c6fe34c6d9c8e1ba78b1556263c807a1ca7d7a200cda82")},
+                { 0, uint256S("0x00000759bb3da130d7c9aedae170da8335f5a0d01a9007e4c8d3ccd08ace6a42") }
             }
         };
 
@@ -234,8 +242,8 @@ public:
 
         genesis = CreateGenesisBlock(1528954643, 7170961, 0x1e0fffff, 1);
         consensus.hashGenesisBlock = genesis.GetHash();
-        assert(consensus.hashGenesisBlock == uint256S("0x00000b773a72afd051c6fe34c6d9c8e1ba78b1556263c807a1ca7d7a200cda82"));
-        assert(genesis.hashMerkleRoot == uint256S("0xe08ae0cfc35a1d70e6764f347fdc54355206adeb382446dd54c32cd0201000d3"));
+        // assert(consensus.hashGenesisBlock == uint256S("0x00000b773a72afd051c6fe34c6d9c8e1ba78b1556263c807a1ca7d7a200cda82"));
+        // assert(genesis.hashMerkleRoot == uint256S("0xe08ae0cfc35a1d70e6764f347fdc54355206adeb382446dd54c32cd0201000d3"));
 
         vFixedSeeds.clear();
         vSeeds.clear();
@@ -335,8 +343,8 @@ public:
 
         genesis = CreateGenesisBlock(1528954643, 7170961, 0x1e0fffff, 1);
         consensus.hashGenesisBlock = genesis.GetHash();
-        assert(consensus.hashGenesisBlock == uint256S("0x00000b773a72afd051c6fe34c6d9c8e1ba78b1556263c807a1ca7d7a200cda82"));
-        assert(genesis.hashMerkleRoot == uint256S("0xe08ae0cfc35a1d70e6764f347fdc54355206adeb382446dd54c32cd0201000d3"));
+        // assert(consensus.hashGenesisBlock == uint256S("0x00000b773a72afd051c6fe34c6d9c8e1ba78b1556263c807a1ca7d7a200cda82"));
+        // assert(genesis.hashMerkleRoot == uint256S("0xe08ae0cfc35a1d70e6764f347fdc54355206adeb382446dd54c32cd0201000d3"));
 
         vFixedSeeds.clear(); //!< Regtest mode doesn't have any fixed seeds.
         vSeeds.clear();      //!< Regtest mode doesn't have any DNS seeds.

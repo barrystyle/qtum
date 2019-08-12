@@ -60,7 +60,8 @@ public:
     const Consensus::Params& GetConsensus() const { return consensus; }
     const CMessageHeader::MessageStartChars& MessageStart() const { return pchMessageStart; }
     int GetDefaultPort() const { return nDefaultPort; }
-
+    const uint256& ProofOfWorkLimit() const { return consensus.powLimit; }
+    
     const CBlock& GenesisBlock() const { return genesis; }
     /** Default value for -checkmempool and -checkblockindex argument */
     bool DefaultConsistencyChecks() const { return fDefaultConsistencyChecks; }
@@ -84,6 +85,16 @@ public:
     const std::vector<SeedSpec6>& FixedSeeds() const { return vFixedSeeds; }
     const CCheckpointData& Checkpoints() const { return checkpointData; }
     const ChainTxData& TxData() const { return chainTxData; }
+    int FirstSCBlock() const { return nFirstSCBlock; }
+    int SwitchPhi2Block() const { return nSwitchPhi2Block; }
+    int FirstSplitRewardBlock() const { return nSplitRewardBlock; }
+    
+    /** Height at which the premine payment happens */
+    int PreminePayment() const { return nPreminePaymentandHardForkBlock; }
+
+    /** Devfee vars */
+    int StartDevfeeBlock() const { return nStartDevfeeBlock; }
+
 protected:
     CChainParams() {}
 
@@ -105,6 +116,21 @@ protected:
     CCheckpointData checkpointData;
     ChainTxData chainTxData;
     bool m_fallback_fee_enabled;
+    bool fSkipProofOfWorkCheck;
+    bool fTestnetToBeDeprecatedFieldRPC;
+    bool fHeadersFirstSyncingActive;
+    int nPoolMaxTransactions;
+    std::string strSporkKey;
+    std::string strDarksendPoolDummyAddress;
+    int64_t nStartMasternodePayments;
+    int64_t nStakingRoundPeriod;
+    int64_t nStakingInterval;
+    int64_t nStakingMinAge;
+    int nFirstSCBlock;
+    int nSwitchPhi2Block;
+    int nSplitRewardBlock;
+    int nPreminePaymentandHardForkBlock;
+    int nStartDevfeeBlock;
 };
 
 /**
@@ -125,5 +151,8 @@ const CChainParams &Params();
  * @throws std::runtime_error when the chain is not supported.
  */
 void SelectParams(const std::string& chain);
+
+// Note: it's deliberate that this returns "false" for regression test mode.
+inline bool IsTestNet() { return false; }
 
 #endif // BITCOIN_CHAINPARAMS_H

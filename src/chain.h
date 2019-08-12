@@ -190,6 +190,9 @@ public:
     //! pointer to the index of some further predecessor of this block
     CBlockIndex* pskip;
 
+    //ppcoin: trust score of block chain
+    uint256 bnChainTrust;
+
     //! height of the entry in the chain. The genesis block has height 0
     int nHeight;
 
@@ -218,23 +221,16 @@ public:
     uint32_t nStatus;
 
     //! block header
-    int32_t nVersion;
+    int nVersion;
     uint256 hashMerkleRoot;
-    uint32_t nTime;
-    uint32_t nBits;
-    uint32_t nNonce;
-    uint256 hashStateRoot; // qtum
-    uint256 hashUTXORoot; // qtum
-    // block signature - proof-of-stake protect the block by signing the block using a stake holder private key
-    std::vector<unsigned char> vchBlockSig;
-    uint256 nStakeModifier;
-    // proof-of-stake specific fields
-    COutPoint prevoutStake;
-    uint256 hashProof; // qtum
-    uint64_t nMoneySupply;
+    unsigned int nTime;
+    unsigned int nBits;
+    unsigned int nNonce;
+    uint256 hashStateRoot; // lux
+    uint256 hashUTXORoot; // lux
 
     //! (memory only) Sequential id assigned to distinguish order in which blocks are received.
-    int32_t nSequenceId;
+    uint32_t nSequenceId;
 
     //! (memory only) Maximum nTime in the chain up to and including this block.
     unsigned int nTimeMax;
@@ -256,18 +252,21 @@ public:
         nSequenceId = 0;
         nTimeMax = 0;
 
+        nMint = 0;
+        nMoneySupply = 0;
+        nFlags = 0;
+        nStakeModifier = 0;
+        nStakeModifierChecksum = 0;
+        prevoutStake.SetNull();
+        nStakeTime = 0;
+
         nVersion       = 0;
         hashMerkleRoot = uint256();
         nTime          = 0;
         nBits          = 0;
         nNonce         = 0;
-        hashStateRoot  = uint256(); // qtum
-        hashUTXORoot   = uint256(); // qtum
-        vchBlockSig.clear();
-        nStakeModifier = uint256();
-        hashProof = uint256();
-        prevoutStake.SetNull();
-        nMoneySupply = 0;
+        hashStateRoot  = uint256(); // lux
+        hashUTXORoot   = uint256(); // lux
     }
 
     CBlockIndex()
@@ -275,7 +274,7 @@ public:
         SetNull();
     }
 
-    explicit CBlockIndex(const CBlockHeader& block)
+    CBlockIndex(const CBlock& block)
     {
         SetNull();
 
@@ -284,13 +283,26 @@ public:
         nTime          = block.nTime;
         nBits          = block.nBits;
         nNonce         = block.nNonce;
+        hashStateRoot  = block.hashStateRoot; // lux
+        hashUTXORoot   = block.hashUTXORoot; // lux
+
+        //Proof of Stake
+        bnChainTrust = 0;
+        nMint = 0;
         nMoneySupply   = 0;
-        hashStateRoot  = block.hashStateRoot; // qtum
-        hashUTXORoot   = block.hashUTXORoot; // qtum
-        nStakeModifier = uint256();
-        hashProof = uint256(); 
-        prevoutStake   = block.prevoutStake; // qtum
-        vchBlockSig    = block.vchBlockSig; // qtum
+        nFlags = 0;
+        nStakeModifier = 0;
+        nStakeModifierChecksum = 0;
+        hashProofOfStake = 0;
+
+        if (block.IsProofOfStake()) {
+            SetProofOfStake();
+            prevoutStake = block.vtx[1].vin[0].prevout;
+            nStakeTime = block.nTime;
+        } else {
+            prevoutStake.SetNull();
+            nStakeTime = 0;
+        }
     }
 
     CDiskBlockPos GetBlockPos() const {
@@ -321,10 +333,8 @@ public:
         block.nTime          = nTime;
         block.nBits          = nBits;
         block.nNonce         = nNonce;
-        block.hashStateRoot  = hashStateRoot; // qtum
-        block.hashUTXORoot   = hashUTXORoot; // qtum
-        block.vchBlockSig    = vchBlockSig;
-        block.prevoutStake   = prevoutStake;
+        block.hashStateRoot  = hashStateRoot; // lux
+        block.hashUTXORoot   = hashUTXORoot; // lux
         return block;
     }
 
@@ -370,12 +380,42 @@ public:
 
     bool IsProofOfWork() const // qtum
     {
-        return !IsProofOfStake();
+        return !(nFlags & BLOCK_PROOF_OF_STAKE);
     }
 
     bool IsProofOfStake() const
     {
-        return !prevoutStake.IsNull();
+        return (nFlags & BLOCK_PROOF_OF_STAKE);
+    }
+
+    void SetProofOfStake()
+    {
+        nFlags |= BLOCK_PROOF_OF_STAKE;
+    }
+
+    unsigned int GetStakeEntropyBit() const
+    {
+        return ((GetBlockHash().Get64()) & 1llu);
+    }
+
+    bool SetStakeEntropyBit(unsigned int nEntropyBit)
+    {
+        if (nEntropyBit > 1)
+            return false;
+        nFlags |= (nEntropyBit ? BLOCK_STAKE_ENTROPY : 0);
+        return true;
+    }
+
+    bool GeneratedStakeModifier() const
+    {
+        return (nFlags & BLOCK_STAKE_MODIFIER);
+    }
+
+    void SetStakeModifier(uint64_t nModifier, bool fGeneratedStakeModifier)
+    {
+        nStakeModifier = nModifier;
+        if (fGeneratedStakeModifier)
+            nFlags |= BLOCK_STAKE_MODIFIER;
     }
 
     std::string ToString() const
@@ -429,9 +469,11 @@ class CDiskBlockIndex : public CBlockIndex
 {
 public:
     uint256 hashPrev;
+    uint256 hashNext;
 
     CDiskBlockIndex() {
         hashPrev = uint256();
+        hashNext = uint256();
     }
 
     explicit CDiskBlockIndex(const CBlockIndex* pindex) : CBlockIndex(*pindex) {
@@ -455,21 +497,38 @@ public:
             READWRITE(VARINT(nDataPos));
         if (nStatus & BLOCK_HAVE_UNDO)
             READWRITE(VARINT(nUndoPos));
-        READWRITE(VARINT(nMoneySupply));
+
+
+        READWRITE(nMint);
+        READWRITE(nMoneySupply);
+        READWRITE(nFlags);
+        READWRITE(nStakeModifier);
+        if (IsProofOfStake()) {
+            READWRITE(prevoutStake);
+            READWRITE(nStakeTime);
+            READWRITE(hashProofOfStake);
+        } else {
+            const_cast<CDiskBlockIndex*>(this)->prevoutStake.SetNull();
+            const_cast<CDiskBlockIndex*>(this)->nStakeTime = 0;
+            const_cast<CDiskBlockIndex*>(this)->hashProofOfStake = 0;
+        }
 
         // block header
         READWRITE(this->nVersion);
         READWRITE(hashPrev);
+        READWRITE(hashNext);
         READWRITE(hashMerkleRoot);
         READWRITE(nTime);
         READWRITE(nBits);
         READWRITE(nNonce);
-        READWRITE(hashStateRoot); // qtum
-        READWRITE(hashUTXORoot); // qtum
-        READWRITE(nStakeModifier);
-        READWRITE(prevoutStake);
-        READWRITE(hashProof);
-        READWRITE(vchBlockSig); // qtum
+        //Temporary workaround for cyclic dependency, when including versionbits.
+        //The dependency cycle is block <- versionbits <- chain <- block.
+        //When it is fixed, this check should look like this
+        //if(this->nVersion & VersionBitsMask(Params().GetConsensus(), Consensus::SMART_CONTRACTS_HARDFORK))
+        if ((this->nVersion & (1 << 30)) != 0) {
+            READWRITE(hashStateRoot);       // lux
+            READWRITE(hashUTXORoot);        // lux
+        }
     }
 
     uint256 GetBlockHash() const
@@ -481,13 +540,10 @@ public:
         block.nTime           = nTime;
         block.nBits           = nBits;
         block.nNonce          = nNonce;
-        block.hashStateRoot   = hashStateRoot; // qtum
-        block.hashUTXORoot    = hashUTXORoot; // qtum
-        block.vchBlockSig     = vchBlockSig;
-        block.prevoutStake    = prevoutStake;
-        return block.GetHash();
+        block.hashStateRoot   = hashStateRoot; // lux
+        block.hashUTXORoot    = hashUTXORoot; // lux
+        return block.GetHash(nHeight >= Params().SwitchPhi2Block());
     }
-
 
     std::string ToString() const
     {
@@ -511,13 +567,24 @@ public:
         return vChain.size() > 0 ? vChain[0] : nullptr;
     }
 
-    /** Returns the index entry for the tip of this chain, or nullptr if none. */
-    CBlockIndex *Tip() const {
-        return vChain.size() > 0 ? vChain[vChain.size() - 1] : nullptr;
+    /** Returns the index entry for the tip of this chain, or NULL if none. */
+    CBlockIndex* Tip(bool fProofOfStake = false) const
+    {
+        if (vChain.size() < 1)
+            return NULL;
+
+        CBlockIndex* pindex = vChain[vChain.size() - 1];
+
+        if (fProofOfStake) {
+            while (pindex && pindex->pprev && !pindex->IsProofOfStake())
+                pindex = pindex->pprev;
+        }
+        return pindex;
     }
 
-    /** Returns the index entry at a particular height in this chain, or nullptr if no such height exists. */
-    CBlockIndex *operator[](int nHeight) const {
+    /** Returns the index entry at a particular height in this chain, or NULL if no such height exists. */
+    CBlockIndex* operator[](int nHeight) const
+    {
         if (nHeight < 0 || nHeight >= (int)vChain.size())
             return nullptr;
         return vChain[nHeight];

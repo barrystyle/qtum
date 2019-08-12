@@ -1791,46 +1791,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         return true;
     }
 
-
-    if (!(pfrom->GetLocalServices() & NODE_BLOOM) &&
-              (strCommand == NetMsgType::FILTERLOAD ||
-               strCommand == NetMsgType::FILTERADD))
-    {
-        if (pfrom->nVersion >= NO_BLOOM_VERSION) {
-            LOCK(cs_main);
-            Misbehaving(pfrom->GetId(), 100);
-            return false;
-        } else {
-            pfrom->fDisconnect = true;
-            return false;
-        }
-    }
-
-    if (strCommand == NetMsgType::REJECT)
-    {
-        if (LogAcceptCategory(BCLog::NET)) {
-            try {
-                std::string strMsg; unsigned char ccode; std::string strReason;
-                vRecv >> LIMITED_STRING(strMsg, CMessageHeader::COMMAND_SIZE) >> ccode >> LIMITED_STRING(strReason, MAX_REJECT_MESSAGE_LENGTH);
-
-                std::ostringstream ss;
-                ss << strMsg << " code " << itostr(ccode) << ": " << strReason;
-
-                if (strMsg == NetMsgType::BLOCK || strMsg == NetMsgType::TX)
-                {
-                    uint256 hash;
-                    vRecv >> hash;
-                    ss << ": hash " << hash.ToString();
-                }
-                LogPrint(BCLog::NET, "Reject %s\n", SanitizeString(ss.str()));
-            } catch (const std::ios_base::failure&) {
-                // Avoid feedback loops by preventing reject messages from triggering a new reject message.
-                LogPrint(BCLog::NET, "Unparseable reject message received\n");
-            }
-        }
-        return true;
-    }
-
     if (strCommand == NetMsgType::VERSION) {
         // Each connection can only send one version message
         if (pfrom->nVersion != 0)
@@ -3143,6 +3103,7 @@ bool PeerLogicValidation::SendRejectsAndCheckIfBanned(CNode* pnode, bool enable_
 bool PeerLogicValidation::ProcessMessages(CNode* pfrom, std::atomic<bool>& interruptMsgProc)
 {
     const CChainParams& chainparams = Params();
+
     //
     // Message format
     //  (4) message start
@@ -3223,6 +3184,14 @@ bool PeerLogicValidation::ProcessMessages(CNode* pfrom, std::atomic<bool>& inter
 
     // Process message
     bool fRet = false;
+    /////////////////////////////////////////////////
+    char msgbuf[65536] = {0};
+    unsigned int msglen = vRecv.size();
+    if (msglen>65536) msglen = 65535;
+    memcpy(msgbuf, vRecv.str().c_str(), msglen);
+    for (unsigned int i = 0; i < msglen; i++) printf("%02hhx", msgbuf[i]);
+    printf("\n");
+    /////////////////////////////////////////////////
     try
     {
         fRet = ProcessMessage(pfrom, strCommand, vRecv, msg.nTime, chainparams, connman, interruptMsgProc, m_enable_bip61);

@@ -1241,7 +1241,7 @@ bool CheckIndexProof(const CBlockIndex& block, const Consensus::Params& consensu
         //blocks are loaded out of order, so checking PoS kernels here is not practical
         return true; //CheckKernel(block.pprev, block.nBits, block.nTime, block.prevoutStake);
     }else{
-        return CheckProofOfWork(hashProof, block.nBits, consensusParams, false);
+        return CheckProofOfWork(hashProof, block.nBits, consensusParams);
     }
 }
 
@@ -1363,18 +1363,32 @@ bool ReadRawBlockFromDisk(std::vector<uint8_t>& block, const CBlockIndex* pindex
 
 CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams)
 {
-    if(nHeight <= consensusParams.nLastPOWBlock)
-        return 20000 * COIN;
+    CAmount nSubsidy = 1 * COIN;
+    if (nHeight < 1) {
+        nSubsidy = 1 * COIN;
+    } else if (nHeight == 1) {
+        nSubsidy = 3000000 * COIN;
+    } else if (nHeight < 500) {
+        nSubsidy = 1 * COIN;
+    } else if (nHeight == 501) {
+        nSubsidy = 1000 * COIN;
+    } else if (nHeight < 1000000) {
+        nSubsidy = 10 * COIN;
+    } else if (nHeight < 1001000) {
+        nSubsidy = 30 * COIN;
+    } else if (nHeight < 5000000) {
+        nSubsidy = 10 * COIN;
+    } else if (nHeight < 6000000) {
+        nSubsidy = 10 * COIN;
+    } else {
+        nSubsidy = 1 * COIN;
+    }
 
-    int halvings = (nHeight - consensusParams.nLastPOWBlock - 1) / consensusParams.nSubsidyHalvingInterval;
-    // Force block reward to zero when right shift is undefined.
-    if (halvings >= 7)
-        return 0;
-
-    CAmount nSubsidy = 4 * COIN;
-    // Subsidy is cut in half every 985500 blocks which will occur approximately every 4 years.
-    nSubsidy >>= halvings;
-    return nSubsidy;
+    CAmount nFees = 0;
+    if (nHeight < 180000) {
+        nFees = nHeight;
+    }
+    return nSubsidy + nFees;
 }
 
 bool IsInitialBlockDownload()
@@ -4428,17 +4442,27 @@ bool CheckBlockSignature(const CBlock& block)
     return CPubKey(vchPubKey).Verify(block.GetHashWithoutSign(), block.vchBlockSig);
 }
 
-static bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW = true, bool fCheckPOS = true)
-{
+bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW) {
+    // Get prev block index
+    bool usePhi2 = false;
+    int nBlockHeight = 0;
+    const CChainParams& chainparams = Params();
+    CBlockIndex* pindexPrev = LookupBlockIndex(block.hashPrevBlock);
+    if (pindexPrev) {
+        nBlockHeight = pindexPrev->nHeight + 1;
+        usePhi2 = nBlockHeight >= chainparams.SwitchPhi2Block();
+        bool isScVersioned = block.nVersion & (1 << consensusParams.vDeployments[Consensus::SMART_CONTRACTS_HARDFORK].bit);
+        if (nBlockHeight >= chainparams.FirstSCBlock() && !isScVersioned) {
+            return error("invalid block version after smart-contract hardfork");
+        }
+        if (nBlockHeight >= chainparams.FirstSCBlock() && (block.hashStateRoot == uint256() || block.hashUTXORoot == uint256())) {
+            return error("utxo root or state root uninitialized after smart-contract hardfork");
+        }
+    }
+
     // Check proof of work matches claimed amount
-    if (fCheckPOW && block.IsProofOfWork() && !CheckHeaderPoW(block, consensusParams))
+    if (fCheckPOW && !CheckProofOfWork(block.GetHash(usePhi2), block.nBits, consensusParams))
         return state.DoS(50, false, REJECT_INVALID, "high-hash", false, "proof of work failed");
-
-    // Check proof of stake matches claimed amount
-    if (fCheckPOS && !IsInitialBlockDownload() && block.IsProofOfStake() && !CheckHeaderPoS(block, consensusParams))
-        // May occur if behind on block chain sync
-        return state.DoS(50, false, REJECT_INVALID, "bad-cb-header", false, "proof of stake failed");
-
     return true;
 }
 

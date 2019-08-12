@@ -610,8 +610,9 @@ bool CBlockTreeDB::LoadBlockIndexGuts(const Consensus::Params& consensusParams, 
             CDiskBlockIndex diskindex;
             if (pcursor->GetValue(diskindex)) {
                 // Construct block index object
-                CBlockIndex* pindexNew = insertBlockIndex(diskindex.GetBlockHash());
-                pindexNew->pprev          = insertBlockIndex(diskindex.hashPrev);
+                CBlockIndex* pindexNew = InsertBlockIndex(diskindex.GetBlockHash());
+                pindexNew->pprev = InsertBlockIndex(diskindex.hashPrev);
+                pindexNew->pnext = InsertBlockIndex(diskindex.hashNext);
                 pindexNew->nHeight        = diskindex.nHeight;
                 pindexNew->nFile          = diskindex.nFile;
                 pindexNew->nDataPos       = diskindex.nDataPos;
@@ -621,27 +622,62 @@ bool CBlockTreeDB::LoadBlockIndexGuts(const Consensus::Params& consensusParams, 
                 pindexNew->nTime          = diskindex.nTime;
                 pindexNew->nBits          = diskindex.nBits;
                 pindexNew->nNonce         = diskindex.nNonce;
-                pindexNew->nMoneySupply   = diskindex.nMoneySupply;
                 pindexNew->nStatus        = diskindex.nStatus;
                 pindexNew->nTx            = diskindex.nTx;
-                pindexNew->hashStateRoot  = diskindex.hashStateRoot; // qtum
-                pindexNew->hashUTXORoot   = diskindex.hashUTXORoot; // qtum
+                pindexNew->hashStateRoot  = diskindex.hashStateRoot; // lux
+                pindexNew->hashUTXORoot   = diskindex.hashUTXORoot; // lux
+
+                // Proof Of Stake
+                pindexNew->nMint = diskindex.nMint;
+                pindexNew->nMoneySupply = diskindex.nMoneySupply;
+                pindexNew->nFlags = diskindex.nFlags;
                 pindexNew->nStakeModifier = diskindex.nStakeModifier;
-                pindexNew->prevoutStake   = diskindex.prevoutStake;
-                pindexNew->vchBlockSig    = diskindex.vchBlockSig; // qtum
+                pindexNew->prevoutStake = diskindex.prevoutStake;
+                pindexNew->nStakeTime = diskindex.nStakeTime;
+                pindexNew->hashProofOfStake = diskindex.hashProofOfStake;
 
-                if (!CheckIndexProof(*pindexNew, Params().GetConsensus()))
-                    return error("%s: CheckIndexProof failed: %s", __func__, pindexNew->ToString());
+                bool isPoW = (diskindex.nNonce != 0) && pindexNew->nHeight <= Params().LAST_POW_BLOCK();
+                if (isPoW) {
+                    auto const &hash(pindexNew->GetBlockHash());
+                    if (!CheckProofOfWork(hash, pindexNew->nBits, Params().GetConsensus())) {
+                        unsigned int nBits = pindexPrev ? pindexPrev->nBits : 0;
+                        return error("%s: CheckProofOfWork failed: %d %s (%d, %d)", __func__, pindexNew->nHeight, hash.GetHex(), pindexNew->nBits, nBits);
+                    }
+                } else {
+                    stake->MarkStake(pindexNew->prevoutStake, pindexNew->nStakeTime);
+                    auto const &hash(pindexNew->GetBlockHash());
+                    uint256 proof;
+                    if (pindexNew->hashProofOfStake == 0) {
+                        LogPrint("debug", "skip invalid indexed orphan block %d %s with empty data\n", pindexNew->nHeight, hash.GetHex());
+                        nDiscarded++;
+                        nFirstDiscarded = diskindex.nHeight < nFirstDiscarded ? diskindex.nHeight : nFirstDiscarded;
+                        batch.Erase(make_pair(DB_BLOCK_INDEX, hash));
+                pcursor->Next();
+                        continue;
+                    } else if (stake->GetProof(hash, proof)) {
+                        if (proof != pindexNew->hashProofOfStake)
+                            return error("%s: diverged stake %s, %s (block %s)\n", __func__, 
+                                         pindexNew->hashProofOfStake.GetHex(), proof.GetHex(), hash.GetHex());
+                    } else {
+                                    stake->SetProof(hash, pindexNew->hashProofOfStake);
+                    }
+                }
 
-                // NovaCoin: build setStakeSeen
-                if (pindexNew->IsProofOfStake())
-                    setStakeSeen.insert(std::make_pair(pindexNew->prevoutStake, pindexNew->nTime));
+                pindexPrev = pindexNew;
                 pcursor->Next();
             } else {
-                return error("%s: failed to read value", __func__);
+                break; // if shutdown requested or finished loading block index
             }
+        } catch (std::exception& e) {
+            return error("%s : Deserialize or I/O error - %s", __func__, e.what());
+        }
+    }
+
+    if (nDiscarded) {
+        if (WriteBatch(batch)) {
+            LogPrintf("pruned %d orphaned blocks from disk index\n", nDiscarded);
         } else {
-            break;
+            return error("%d invalid blocks in disk index, restart with -reindex is required! (first was %d)\n", nDiscarded, nFirstDiscarded);
         }
     }
 
